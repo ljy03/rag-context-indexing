@@ -13,3 +13,6 @@ indices/dense_standard/
 # Python
 __pycache__/
 *.pyc
+
+# JVM / IDE
+hs_err_pid*.log

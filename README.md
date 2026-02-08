@@ -38,8 +38,8 @@ rag-context-indexing/
 # Parse qrels and extract relevant doc/segment IDs (optional, for analysis)
 python scripts/01_parse_qrels.py
 
-# Select topics until ~5000 docs, extract segments, create filtered qrels/topics
-TARGET_DOCS=5000 python scripts/02_extract_relevant_segments.py
+# Select topics until ~5000 segments, extract segments, create filtered qrels/topics
+TARGET_SEGMENTS=5000 python scripts/02_extract_relevant_segments.py
 
 # Normalize segments to standard schema
 python scripts/03_normalize_base_segments.py
@@ -56,13 +56,15 @@ python scripts/04_make_standard_and_contextualized.py
 ### 2. Indexing
 
 ```bash
-# Build BM25 (Lucene) and Dense (DPR + FAISS) indices
+# Build BM25 (Lucene) and Dense (Contriever + FAISS) indices
 bash scripts/05_build_indices.sh
 ```
 
+Dense indexing uses **Contriever** (`facebook/contriever`) with mean pooling (see `scripts/encode_contriever.py`).
+
 Environment variables:
 - `THREADS`: Indexing threads (default: 8)
-- `DEVICE`: Encoding device - `cpu` or `mps` (default: mps)
+- `DEVICE`: Encoding device - `cpu`, `cuda`, or `mps` (default: mps)
 - `BATCH_SIZE`: Dense encoding batch size (default: 64)
 
 ### 3. Retrieval & Evaluation
@@ -91,8 +93,8 @@ python -m pyserini.eval.trec_eval -c -M 100 \
 |--------|---------|-----|-----|------------|
 | BM25 Standard | **0.4899** | **0.8693** | **0.2760** | **0.4623** |
 | BM25 Contextualized | 0.4194 | 0.7883 | 0.2055 | 0.3982 |
-| Dense (DPR) Standard | 0.3345 | 0.6899 | 0.1610 | 0.3413 |
-| Dense (DPR) Contextualized | 0.3128 | 0.6525 | 0.1500 | 0.3292 |
+| Dense (Contriever) Standard | — | — | — | — |
+| Dense (Contriever) Contextualized | — | — | — | — |
 
 **Key findings:**
 - Standard segments slightly outperform contextualized (~10-15% gap)

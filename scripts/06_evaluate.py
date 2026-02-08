@@ -43,12 +43,13 @@ def run_bm25(index_path: Path, run_name: str):
     print(f"Wrote: {run_file}")
     return run_file
 
-# ============ Dense Retrieval ============
+# ============ Dense Retrieval (Contriever: facebook/contriever with mean pooling) ============
 def run_dense(index_path: Path, encoder: str, run_name: str):
     from pyserini.search.faiss import FaissSearcher
-    from pyserini.encode import DprQueryEncoder
+    from pyserini.encode import AutoQueryEncoder
     
-    query_encoder = DprQueryEncoder(encoder)
+    # Contriever uses same model for query and document (AutoQueryEncoder with facebook/contriever)
+    query_encoder = AutoQueryEncoder(encoder)
     searcher = FaissSearcher(str(index_path), query_encoder)
     
     run_file = RUNS_DIR / f"{run_name}.txt"
@@ -64,7 +65,9 @@ def run_dense(index_path: Path, encoder: str, run_name: str):
 # ============ Evaluate with pyserini.eval.trec_eval ============
 def evaluate(run_file: Path):
     print(f"\n=== {run_file.stem} ===")
-    
+    if not run_file.exists() or run_file.stat().st_size == 0:
+        print("(skip: run file empty or missing)")
+        return
     # Run pyserini's trec_eval
     result = subprocess.run(
         [
@@ -97,22 +100,22 @@ if __name__ == "__main__":
         run = run_bm25(INDEX_DIR / "bm25_contextualized", "bm25_contextualized")
         evaluate(run)
     
-    # Dense Standard
+    # Dense Standard (Contriever)
     dense_std_index = INDEX_DIR / "dense_standard" / "index"
     if dense_std_index.exists():
         run = run_dense(
             dense_std_index,
-            "facebook/dpr-question_encoder-multiset-base",
+            "facebook/contriever",
             "dense_standard"
         )
         evaluate(run)
     
-    # Dense Contextualized
+    # Dense Contextualized (Contriever)
     dense_ctx_index = INDEX_DIR / "dense_contextualized" / "index"
     if dense_ctx_index.exists():
         run = run_dense(
             dense_ctx_index,
-            "facebook/dpr-question_encoder-multiset-base",
+            "facebook/contriever",
             "dense_contextualized"
         )
         evaluate(run)

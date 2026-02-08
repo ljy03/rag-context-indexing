@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Create standard and contextualized corpus variants.
-Contextualized: segment FIRST, then light context (title/headings).
+Contextualized: segment FIRST, then context (title only, no section headings).
 """
 import json
 from pathlib import Path
@@ -13,15 +13,10 @@ OUT_STD = DATA_DIR / "corpus_standard.jsonl"
 OUT_CTX = DATA_DIR / "corpus_contextualized.jsonl"
 
 def build_context_suffix(doc_meta):
-    """Build a SHORT context suffix (title + headings only)."""
-    parts = []
-    if doc_meta.get("title"):
-        parts.append(f"Title: {doc_meta['title']}")
-    hs = doc_meta.get("headings") or []
-    if hs:
-        parts.append("Section: " + " > ".join(hs[:3]))
-    if parts:
-        return " | ".join(parts)
+    """Build context suffix: title only (no section headings)."""
+    title = doc_meta.get("title") or ""
+    if title.strip():
+        return f"Title: {title.strip()}"
     return ""
 
 records = []

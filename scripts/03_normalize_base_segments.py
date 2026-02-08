@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
+"""Normalize mini_corpus segments to base_segments schema for step 04."""
 import json
+import sys
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT_DIR / "data"
 INP = DATA_DIR / "mini_corpus_all_segments.jsonl"
 OUT = DATA_DIR / "base_segments.jsonl"
+
+if not INP.exists():
+    print(f"Error: input not found: {INP}", file=sys.stderr)
+    sys.exit(1)
 
 def pick_first(obj, keys, default=None):
     for k in keys:
