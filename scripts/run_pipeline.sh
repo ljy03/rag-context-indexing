@@ -1,22 +1,23 @@
 #!/usr/bin/env bash
-# Run full pipeline 02 -> 03 -> 04 -> 05 -> 06 (no comments in execution path)
+# Run full pipeline: mine_distractors -> extract_segments -> make_corpora -> build_indices -> evaluate
+# mine_distractors builds fair mini-corpus IDs (positives + BM25 hard negatives); extract then pulls from tar.
 set -e
 cd "$(dirname "$0")/.."
 export TARGET_SEGMENTS="${TARGET_SEGMENTS:-5000}"
 
-echo "=== 02 Extract ==="
-python scripts/02_extract_relevant_segments.py
+echo "=== mine_distractors (positives + BM25 hard negatives) ==="
+python scripts/mine_distractors.py
 
-echo "=== 03 Normalize ==="
-python scripts/03_normalize_base_segments.py
+echo "=== extract_segments ==="
+python scripts/extract_segments.py
 
-echo "=== 04 Standard + Contextualized ==="
-python scripts/04_make_standard_and_contextualized.py
+echo "=== make_corpora ==="
+python scripts/make_corpora.py
 
-echo "=== 05 Build indices ==="
-bash scripts/05_build_indices.sh
+echo "=== build_indices ==="
+bash scripts/build_indices.sh
 
-echo "=== 06 Evaluate ==="
-python scripts/06_evaluate.py
+echo "=== evaluate ==="
+python scripts/evaluate.py
 
 echo "Done."

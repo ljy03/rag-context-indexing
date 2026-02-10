@@ -41,7 +41,6 @@ build_dense() {
   local index_dir="${out_dir}/index"
 
   mkdir -p "${index_dir}"
-  # Contriever (facebook/contriever) with mean pooling - see scripts/encode_contriever.py
   python "${ROOT_DIR}/scripts/encode_contriever.py" \
     --corpus "${corpus_file}" \
     --output "${index_dir}" \
