@@ -92,7 +92,10 @@ with tarfile.open(CORPUS_TAR, "r") as tf, OUT_MINI.open("w", encoding="utf-8") a
         if len(segids_in_corpus) >= len(wanted_segids):
             break
 
+missing = wanted_segids - segids_in_corpus
 print(f"Kept segments: {len(segids_in_corpus)} unique")
+if missing:
+    print(f"Missing IDs: {len(missing)}")
 print(f"Wrote: {OUT_MINI}")
 
 # ============ Step 3: Filtered qrels — only rel > 0 and segid in corpus ============

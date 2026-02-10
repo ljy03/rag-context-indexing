@@ -13,6 +13,7 @@ Requires: qrels, topics, and msmarco_v2.1_doc_segmented.tar (to build slice).
 """
 import json
 import os
+import random
 import subprocess
 import sys
 import tarfile
@@ -30,8 +31,16 @@ SLICE_CORPUS = DATA_DIR / "slice_corpus.jsonl"
 MINI_IDS = DATA_DIR / "mini_ids.txt"
 BM25_SLICE_INDEX = INDEX_DIR / "bm25_slice"
 
-# Lighter: mine from first SLICE_SIZE segments of the tar (not full corpus)
+# Corpus size caps and distractor controls (override with env vars):
+#   P_PER_TOPIC       max positive segment IDs per topic; sampled if over (default 10)
+#   MAX_DISTRACTORS   cap on total unique distractors (default 5000)
+#   D_PER_TOPIC       max distractors per topic (default 100)
+#   BM25_K            BM25 overfetch depth per topic (default 2000)
+#   MAX_PER_DOC_DISTRACTORS  max segments per parent doc when picking distractors (default 2)
+#   SLICE_SIZE        segments in slice corpus for BM25 (default 100000)
 SLICE_SIZE = int(os.getenv("SLICE_SIZE", "100000"))
+P_PER_TOPIC = int(os.getenv("P_PER_TOPIC", "10"))
+MAX_DISTRACTORS = int(os.getenv("MAX_DISTRACTORS", "5000"))
 D_PER_TOPIC = int(os.getenv("D_PER_TOPIC", "100"))
 BM25_K = int(os.getenv("BM25_K", "2000"))
 MAX_PER_DOC = int(os.getenv("MAX_PER_DOC_DISTRACTORS", "2"))
@@ -60,9 +69,8 @@ def main():
         print("Error: need qrels and topics (e.g. qrels.umbrela.rag24.test.txt, topics.rag24.test.txt)", file=sys.stderr)
         sys.exit(1)
 
-    # --- Step A: P(qid) = relevant segment IDs per topic ---
+    # --- Step A: P(qid) = relevant segment IDs per topic (full); then cap per topic with P_PER_TOPIC ---
     positives_per_topic = {}
-    all_positives = set()
     with QRELS_PATH.open("r", encoding="utf-8") as f:
         for line in f:
             parts = line.strip().split()
@@ -71,11 +79,9 @@ def main():
             topic, _, segid, rel = parts[0], parts[1], parts[2], parts[3]
             if int(rel) <= 0:
                 continue
-            all_positives.add(segid)
             if topic not in positives_per_topic:
                 positives_per_topic[topic] = set()
             positives_per_topic[topic].add(segid)
-    print(f"Positives: {len(all_positives)} segments across {len(positives_per_topic)} topics")
 
     # --- Load topics ---
     topic_to_query = {}
@@ -84,13 +90,27 @@ def main():
             parts = line.strip().split("\t", 1)
             if len(parts) == 2:
                 topic_to_query[parts[0]] = parts[1]
-    topics_to_mine = [t for t in topic_to_query if t in positives_per_topic]
+    topics_to_mine = sorted(t for t in topic_to_query if t in positives_per_topic)
     print(f"Topics with positives: {len(topics_to_mine)}")
 
+    # Cap positives per topic: sample P_PER_TOPIC per topic (deterministic, balanced)
+    random.seed(0)
+    all_positives = set()
+    for topic in topics_to_mine:
+        pos_list = sorted(positives_per_topic[topic])
+        if len(pos_list) > P_PER_TOPIC:
+            pos_list = random.sample(pos_list, P_PER_TOPIC)
+        all_positives.update(pos_list)
+    print(f"Positives: {len(all_positives)} (P_PER_TOPIC={P_PER_TOPIC}) across {len(topics_to_mine)} topics")
+    print(f"Distractor settings: MAX_DISTRACTORS={MAX_DISTRACTORS}, D_PER_TOPIC={D_PER_TOPIC}, BM25_K={BM25_K}, MAX_PER_DOC={MAX_PER_DOC}")
+
     # --- Step B (slice): Build slice corpus from tar if missing ---
+    # Note: slice is built from first SLICE_SIZE segments in tar order; many qrels positives
+    # may not appear in this slice, so BM25 negatives are an approximation (can be easier/off-distribution).
     if not SLICE_CORPUS.exists() or os.path.getsize(SLICE_CORPUS) == 0:
         print(f"Building slice corpus ({SLICE_SIZE} segments) from tar...")
         n = 0
+        printed_keys = False
         with tarfile.open(CORPUS_TAR, "r") as tf, SLICE_CORPUS.open("w", encoding="utf-8") as out:
             for member in tf:
                 if not member.isfile() or not member.name.endswith(".json.gz"):
@@ -103,8 +123,11 @@ def main():
                         if n >= SLICE_SIZE:
                             break
                         obj = json.loads(line)
+                        if not printed_keys:
+                            print(f"First corpus record keys: {list(obj.keys())}")
+                            printed_keys = True
                         segid = segment_id_from_record(obj)
-                        seg_text = obj.get("segment") or ""
+                        seg_text = obj.get("segment") or obj.get("contents") or obj.get("text") or ""
                         if isinstance(seg_text, list):
                             seg_text = "\n".join(str(x) for x in seg_text)
                         if not segid or not str(seg_text).strip():
@@ -122,7 +145,9 @@ def main():
     corpus_dir = BM25_SLICE_INDEX / "corpus"
     corpus_dir.mkdir(parents=True, exist_ok=True)
     index_target = BM25_SLICE_INDEX
-    if not (index_target / "segments_2").exists():  # Lucene index marker
+    # Pyserini writes Lucene index under index/; avoid treating corpus/ or leftovers as ready
+    index_ready = (index_target / "index").exists()
+    if not index_ready:
         try:
             (corpus_dir / "corpus.jsonl").unlink(missing_ok=True)
         except Exception:
@@ -155,24 +180,26 @@ def main():
 
     all_distractors = set()
     for topic in topics_to_mine:
+        if len(all_distractors) >= MAX_DISTRACTORS:
+            break
         query = topic_to_query.get(topic, "")
         if not query:
             continue
         P_q = positives_per_topic.get(topic, set())
         hits = searcher.search(query, k=BM25_K)
         doc_count = {}
-        D_q = []
+        added_this_topic = 0
         for hit in hits:
-            if hit.docid in P_q:
+            if len(all_distractors) >= MAX_DISTRACTORS or added_this_topic >= D_PER_TOPIC:
+                break
+            if hit.docid in P_q or hit.docid in all_positives:
                 continue
             doc = parent_docid(hit.docid)
             if doc_count.get(doc, 0) >= MAX_PER_DOC:
                 continue
-            D_q.append(hit.docid)
+            all_distractors.add(hit.docid)
             doc_count[doc] = doc_count.get(doc, 0) + 1
-            if len(D_q) >= D_PER_TOPIC:
-                break
-        all_distractors.update(D_q)
+            added_this_topic += 1
 
     wanted_ids = all_positives | all_distractors
     print(f"Distractors: {len(all_distractors)} unique; mini corpus size: {len(wanted_ids)}")
