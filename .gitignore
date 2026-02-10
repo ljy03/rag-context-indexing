@@ -1,9 +1,12 @@
-# Large files over 100MB (GitHub limit)
+# Large files / generated (don't commit)
 data/msmarco_v2.1_doc_segmented.tar
 data/mini_corpus_all_segments.jsonl
 data/base_segments.jsonl
-data/corpus_contextualized.jsonl
+data/mini_ids.txt
+data/slice_corpus.jsonl
+indices/bm25_slice/
 indices/bm25_contextualized/
+indices/bm25_standard/
 indices/dense_contextualized/
 indices/dense_standard/
 

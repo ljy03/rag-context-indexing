@@ -28,12 +28,14 @@ rag-context-indexing/
 │   └── dense_contextualized/index/      # FAISS + Contriever embeddings
 ├── runs/                   # Retrieval run files (TREC format)
 └── scripts/                # Pipeline scripts
-    ├── extract_segments.py     # Extract segments from tar, write filtered qrels/topics
-    ├── make_corpora.py        # Standard + contextualized corpus from mini_corpus
-    ├── build_indices.sh       # BM25 + Dense (Contriever + FAISS)
+    ├── mine_distractors.py    # Positives + BM25 hard negatives → data/mini_ids.txt
+    ├── extract_segments.py   # Extract segments from tar (or use mini_ids.txt), write filtered qrels/topics
+    ├── make_corpora.py       # Standard + contextualized corpus from mini_corpus
+    ├── build_indices.sh      # BM25 + Dense (Contriever + FAISS)
     ├── evaluate.py            # Retrieval + trec_eval
     ├── encode_contriever.py   # Dense indexing (used by build_indices.sh)
-    └── run_pipeline.sh       # Full run: extract_segments → make_corpora → build_indices → evaluate
+    ├── run_pipeline.sh       # Full run: mine_distractors → extract_segments → make_corpora → build_indices → evaluate
+    └── colab_build_and_evaluate.sh  # Colab: only build indices + evaluate (data/ must have corpus_*.jsonl, qrels/topics_filtered)
 ```
 
 ## Pipeline
@@ -124,6 +126,50 @@ Early experiments showed contextualized performing ~50% worse due to a formattin
 2. Contriever to truncate the actual segment (512-token limit)
 
 After fixing the format (segment first, short context suffix), the gap narrowed to ~10-15%. This highlights that *how* you add context is as important as *what* context you add.
+
+## Colab: build indices + evaluate only
+
+If you run **mine_distractors → extract_segments → make_corpora** locally (or have the outputs), you can push the **middle** to GitHub and run only **build_indices + evaluate** on Colab (e.g. to use a free GPU for dense encoding).
+
+**1. What to push to GitHub (optional)**  
+Commit and push these so Colab can clone and run without the tar:
+- `data/corpus_standard.jsonl`
+- `data/corpus_contextualized.jsonl`
+- `data/qrels_filtered.txt`
+- `data/topics_filtered.txt`
+
+(They’re under GitHub’s 100MB limit. The big tar and indices stay in `.gitignore`.)
+
+**2. On Colab**
+
+```python
+# Runtime → Change runtime type → GPU (T4)
+!git clone https://github.com/YOUR_USERNAME/rag-context-indexing.git
+%cd rag-context-indexing
+
+!pip install -q pyserini torch transformers faiss-cpu tqdm
+# Java (for BM25): Colab usually has it; if not: !apt-get install -qq openjdk-11-jdk
+
+# Build indices + evaluate (needs data/corpus_*.jsonl and data/qrels_filtered.txt, topics_filtered.txt)
+!bash scripts/colab_build_and_evaluate.sh
+```
+
+If `build_indices.sh` fails (e.g. no conda), run the steps yourself:
+
+```python
+# BM25 (needs Java + pyserini)
+!python -m pyserini.index.lucene --collection JsonCollection --input indices/bm25_standard/corpus --index indices/bm25_standard --generator DefaultLuceneDocumentGenerator --threads 8 --storePositions --storeDocvectors --storeRaw
+# ... (or create corpus dir and link data/corpus_standard.jsonl, then run the above)
+
+# Dense (GPU)
+!python scripts/encode_contriever.py --corpus data/corpus_standard.jsonl --output indices/dense_standard/index --batch-size 128 --max-length 256 --device cuda
+# Same for corpus_contextualized → indices/dense_contextualized/index
+
+# Evaluate
+!python scripts/evaluate.py
+```
+
+`scripts/colab_build_and_evaluate.sh` checks that the four data files exist, then runs `build_indices.sh` and `evaluate.py`.
 
 ## Requirements
 
